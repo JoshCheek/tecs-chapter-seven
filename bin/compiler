@@ -1,0 +1,14 @@
+#!/usr/bin/env ruby
+
+raise "Uhhhhhhhhh" if ARGV.empty?
+
+$LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
+require 'parser'
+require 'code_generator'
+
+parser = Parser.new File.read ARGV[0]
+code_generator = CodeGenerator.new parser.commands
+
+code_generator.each_instruction do |instruction|
+  puts instruction
+end

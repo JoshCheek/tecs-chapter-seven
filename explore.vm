@@ -1,0 +1,82 @@
+// === Add ===
+push constant 11
+push constant -2
+add // expect 9
+
+
+// === Sub ===
+push constant 11
+push constant -2
+sub // expect 13
+
+
+// === And ===
+push constant 5
+push constant 12
+and // expect 4
+
+
+// === Or  ===
+push constant 5
+push constant 12
+or // expect 13
+
+
+// === NEG ===
+push constant 12
+neg
+
+push constant -24
+neg
+
+push constant 0
+neg
+
+
+// === NOT ===
+push constant 0
+not
+
+push constant 5
+not
+
+push constant -6
+not
+
+
+// === LESS THAN ===
+push constant 1
+push constant 2
+lt // expect true
+
+push constant 2
+push constant 1
+lt // expect false
+
+push constant 1
+push constant 1
+lt // expect false
+
+
+// === GREATER THAN ===
+push constant 1
+push constant 2
+gt // expect false
+
+push constant 2
+push constant 1
+gt // expect true
+
+push constant 1
+push constant 1
+gt // expect false
+
+
+// === EQ ===
+push constant 11
+push constant 22
+eq // expect false
+
+push constant 33
+push constant 33
+eq // expect true
