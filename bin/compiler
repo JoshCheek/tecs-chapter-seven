@@ -1,12 +1,14 @@
 #!/usr/bin/env ruby
 
-raise "Uhhhhhhhhh" if ARGV.empty?
+raise "Yo, dawg, you need some ARGVs" if ARGV.empty?
 
 $LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
 require 'parser'
 require 'code_generator'
+require 'generator_context'
 
-parser = Parser.new File.read ARGV[0]
+concatenated = ARGV.inject("") { |vm_code, filename| vm_code << File.read(filename) }
+parser = Parser.new concatenated
 code_generator = CodeGenerator.new parser.commands
 
 code_generator.each_instruction do |instruction|

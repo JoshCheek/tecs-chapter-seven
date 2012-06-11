@@ -6,7 +6,7 @@ describe CodeGenerator do
 
   describe '#each_command' do
     it 'first yields the setup' do
-      generator.each_command.first.should == VM::Command::Setup
+      generator.each_command.first.should be_a_kind_of VM::Command::Setup
     end
 
     it 'then yields the provided instructions' do
@@ -28,6 +28,27 @@ describe CodeGenerator do
       generator.instructions_for(command).should be_a_kind_of Array
 
       command = VM::Command::Pop.new(VM::Pointer.new 17)
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Label.new('ABC')
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Goto.new('loop')
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::IfGoto.new('somewhere')
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Function.new('name', 4)
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Return.new
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Call.new("thingy", 48)
+      generator.instructions_for(command).should be_a_kind_of Array
+
+      command = VM::Command::Breakpoint.new
       generator.instructions_for(command).should be_a_kind_of Array
     end
 

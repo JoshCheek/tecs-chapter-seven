@@ -1,10 +1,23 @@
 module VM
-  class ArithmeticOperation
-    attr_accessor :name
 
-    def initialize(name)
-      self.name = name
+  def self.compare_by(klass, *variables)
+    klass.class_eval do
+      attr_accessor *variables
+
+      define_method :== do |other|
+        self.class == other.class &&
+          variables.map { |variable| self.send  variable } ==
+          variables.map { |variable| other.send variable }
+      end
+
+      define_method :initialize do |*values|
+        variables.zip(values).each { |variable, value| send "#{variable}=", value }
+      end
     end
+  end
+
+  class ArithmeticOperation
+    VM.compare_by self, :name
 
     def inspect
       name.dup
@@ -14,20 +27,12 @@ module VM
       inspect.downcase
     end
 
-    alias === ==
+    alias === == # can we remove this?
   end
 
 
   class VirtualReference
-    attr_accessor :offset
-
-    def initialize(offset)
-      self.offset = offset
-    end
-
-    def ==(other)
-      self.class == other.class && offset == other.offset
-    end
+    VM.compare_by self, :offset
 
     def to_s
       "#{self.class.name[/:([^:]*$)/, 1].downcase} #{offset}"
@@ -36,15 +41,7 @@ module VM
 
 
   class Reference
-    attr_accessor :offset
-
-    def initialize(offset)
-      self.offset = offset
-    end
-
-    def ==(other)
-      self.class == other.class && offset == other.offset
-    end
+    VM.compare_by self, :offset
 
     def to_s
       "#{self.class.name[/:([^:]*$)/, 1].downcase} #{offset}"
@@ -60,11 +57,16 @@ module VM
       constants.each { |name| yield const_get name }
     end
 
-    Setup = Class.new do
+    class Setup
+      VM.compare_by self
+
       def self.to_s
         'Initalize the stack pointer'
       end
     end
+
+    SetupWithInit    = Class.new Setup
+    SetupWithoutInit = Class.new Setup
 
     Eq  = ArithmeticOperation.new 'Eq'
     Lt  = ArithmeticOperation.new 'Lt'
@@ -76,15 +78,41 @@ module VM
     Not = ArithmeticOperation.new 'Not'
     Or  = ArithmeticOperation.new 'Or'
 
-    class Push
-      attr_accessor :to_push
-      def initialize(to_push)
-        self.to_push = to_push
+    class Return
+      VM.compare_by self
+
+      def to_s
+        'ALL HANDS, STANDBY FOR JUMP'
+      end
+    end
+
+    class Breakpoint
+      VM.compare_by self
+
+      def to_s
+        'BREAKPOINT'
+      end
+    end
+
+    class Function < Struct.new(:name, :locals_count)
+      Classless = Class.new do
+        def ==(other)
+          false
+        end
       end
 
-      def ==(other)
-        self.class == other.class && to_push == other.to_push
+      def klass
+        name[/^(.+)\..*/, 1] || Classless.new
       end
+    end
+
+    Label      = Struct.new :name
+    Goto       = Struct.new :label
+    IfGoto     = Struct.new :label
+    Call       = Struct.new :function_name, :argument_count
+
+    class Push
+      VM.compare_by self, :to_push
 
       def to_s
         "push #{to_push}"
@@ -92,14 +120,7 @@ module VM
     end
 
     class Pop
-      attr_accessor :to_pop
-      def initialize(to_pop)
-        self.to_pop = to_pop
-      end
-
-      def ==(other)
-        self.class == other.class && to_pop == other.to_pop
-      end
+      VM.compare_by self, :to_pop
 
       def to_s
         "pop #{to_pop}"
@@ -108,15 +129,7 @@ module VM
   end
 
   class Constant
-    attr_accessor :value
-    def initialize(value)
-      self.value = value
-    end
-
-    def ==(other)
-      self.class == other.class && value == other.value
-    end
-
+    VM.compare_by self, :value
     def to_s
       "constant #{value}"
     end
@@ -124,11 +137,10 @@ module VM
 
   Pointer = Class.new VirtualReference
   Temp    = Class.new VirtualReference
+  Static  = Class.new VirtualReference
 
   Local    = Class.new Reference
   Argument = Class.new Reference
   This     = Class.new Reference
   That     = Class.new Reference
-  Static   = Class.new Reference
-
 end

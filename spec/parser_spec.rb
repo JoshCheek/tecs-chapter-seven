@@ -54,6 +54,34 @@ module VM
       end
     end
 
+    it 'parses labels as labels' do
+      commands_for('label ABC').should == [Command::Label.new('ABC')]
+    end
+
+    it 'parses gotos with labels' do
+      commands_for('goto loop').should == [Command::Goto.new('loop')]
+    end
+
+    it 'parses if-gotos with labels' do
+      commands_for('if-goto wherever').should == [Command::IfGoto.new('wherever')]
+    end
+
+    it 'parses calls with their argument numbers' do
+      commands_for('call some_shit 90').should == [Command::Call.new('some_shit', 90)]
+    end
+
+    it 'parses function declarations with their local variable count' do
+      commands_for('function name 4').should == [Command::Function.new('name', 4)]
+    end
+
+    it 'parses returns' do
+      commands_for('return').should == [Command::Return.new]
+    end
+
+    it 'parses BREAKPOINT' do
+      commands_for('BREAKPOINT').should == [Command::Breakpoint.new]
+    end
+
     describe '.value_types' do
       %w[argument local static constant this that pointer temp].each do |value_type|
         it "identifies #{value_type}" do

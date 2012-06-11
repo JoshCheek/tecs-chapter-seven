@@ -1,52 +1,93 @@
 require 'vm'
 
 class CodeGenerator
-  BASE_ADDRESSES = {
-    VM::Local    => 1,
-    VM::Argument => 2,
-    VM::Pointer  => 3,
-    VM::This     => 3,
-    VM::That     => 4,
-    VM::Temp     => 5,
-    VM::Static   => 16
-  }
-
-  attr_accessor :unique_label_counter
+  attr_accessor :unique_label_counter, :context
 
   def initialize(commands)
     self.commands = commands
     self.unique_label_counter = 0
-  end
-
-  def each_command(&block)
-    return to_enum :each_command unless block_given?
-    yield VM::Command::Setup
-    commands.each(&block)
+    self.context = GeneratorContext.new
   end
 
   def each_instruction(&block)
     return to_enum :each_instruction unless block_given?
     each_command do |command|
+      context.register_command command
       block.call "// === #{command}"
       instructions_for(command).each(&block)
       block.call ""
     end
   end
 
+  def each_command(&block)
+    return to_enum :each_command unless block_given?
+    yield context.setup_for commands
+    commands.each(&block)
+  end
+
   def instructions_for(command)
-    if command == Setup
-      ['@256', 'D = A', '@0', 'M = D']
-    elsif command.kind_of? VM::ArithmeticOperation
+    case command
+    when Breakpoint
+      ['@9999']
+    when SetupWithoutInit
+      ['@256', 'D = A', '@SP', 'M = D'] # init SP
+    when SetupWithInit
+      ['@256', 'D = A', '@SP', 'M = D', # init SP
+       *instructions_for(VM::Command::Call.new(context.init_function, 0))]
+    when VM::ArithmeticOperation
       arithmetic(command)
-    elsif command.kind_of? Push
+    when Push
       get_value(command.to_push) +
-      ['@0 // Place the value in D at the top of the stack', 'A = M', 'M = D'] +
+      ['@SP // Place the value in D at the top of the stack', 'A = M', 'M = D'] +
       increment_stack_pointer
-    elsif command.kind_of? Pop
-      [*decrement_stack_pointer, '@0', 'A = M', 'D = M', *put_value(command.to_pop)]
+    when Pop
+      [*decrement_stack_pointer, '@SP', 'A = M', 'D = M', *put_value(command.to_pop)]
+    when Label
+      ["(#{context.label_for command.name})"]
+    when Goto
+      ["@#{context.label_for command.label}", '0;JMP']
+    when IfGoto
+      [*pop_to_d, "@#{context.label_for command.label}", "D;JNE"]
+    when Call
+      return_address = context.unique_label "RETURN_FROM_#{command.function_name}"
+      [ "@#{return_address} // Push the label", "D = A", *push_d,
+        "@LCL // Push LCL", 'D = M', *push_d,
+        "@ARG // Push ARG", 'D = M', *push_d,
+        "@THIS // Push THIS", 'D = M', *push_d,
+        "@THAT // Push THAT", 'D = M', *push_d,
+        "@#{command.argument_count + 5} // ARG=SP-n-5", "D = A", "@SP", "D = M - D", "@ARG", "M = D",
+        "@SP // LCL = SP", "D = M", "@LCL", "M = D", # LCL=SP
+        "@#{command.function_name} // It's a leap of faith.", "0;JMP",
+        "(#{return_address})", # declare label
+      ]
+    when Function
+      ["(#{command.name})", *push_constant(0, command.locals_count)]
+    when Return
+      [ "@LCL // LCL-1 -> pointer+1", "A = M - 1", "D = M", "@THAT", "M = D",
+        "@LCL // LCL-2 -> pointer+0", "A = M - 1", "A = A - 1", 'D = M', "@THIS", "M = D",
+        "@3 // push saved ARG", "D = A", "@LCL", "A = M - D", "D = M", *push_d,
+        "@5 // push return address", "D = A", "@LCL", "A = M - D", "D = M", *push_d,
+        "@4 // restore LCL", "D = A", "@LCL", "A = M - D", "D = M", "@LCL", "M = D",
+        '// move return_value to ARG', *decrement_stack_pointer(2), *pop_to_d, "@ARG", "A = M", "M = D", *increment_stack_pointer(3),
+        '// move return address to ARG + 1', *pop_to_d, '@ARG', 'A = M + 1', 'M = D',
+        '// move saved arg to ARG + 2', *pop_to_d, '@ARG', 'A = M + 1', 'A = A + 1', 'M = D',
+        'D = A + 1 // stack pointer to ARG + 3', '@SP', 'M = D',
+        '// restore saved_arg from sp-1 with pop', *pop_to_d, '@ARG', 'M = D',
+        '// pop and return', *pop_to_d, 'A = D', '0;JMP // four... three... two... one... JUMP!',
+      ]
     else
       raise "Don't know how to generate instructions for #{command.inspect}"
     end
+  end
+
+  private
+
+  include VM::Command
+
+  attr_accessor :commands
+
+  def push_constant(value, times_to_push=1)
+    ["@#{value}", "D = A", *times_to_push.times.map { push_d }.flatten]
   end
 
   def get_value(value_type)
@@ -96,8 +137,8 @@ class CodeGenerator
   end
 
   def boolean(check)
-    equal_label = unique_label "#{check}_SUCCESS"
-    done_label  = unique_label "DONE"
+    equal_label = context.unique_label "#{check}_SUCCESS"
+    done_label  = context.unique_label "DONE"
     [*pop_to_d,
      *decrement_stack_pointer,
      *load_stack_pointer,
@@ -114,20 +155,20 @@ class CodeGenerator
      "(#{done_label})"]
   end
 
-  def increment_stack_pointer
-    ['@0 // Increment stack pointer', 'M = M + 1']
+  def increment_stack_pointer(times = 1)
+    ['@SP // Increment stack pointer'] + ['M = M + 1'] * times
   end
 
-  def decrement_stack_pointer
-    ['@0 // Decremement stack pointer', 'M = M - 1']
+  def decrement_stack_pointer(times = 1)
+    ['@SP // Decremement stack pointer'] + ['M = M - 1'] * times
   end
 
-  def base_address(command)
-    BASE_ADDRESSES[command.class]
+  def base_address(value)
+    context.base_address_for(value)
   end
 
   def load_stack_pointer(target = nil)
-    result = ['@0', 'A = M']
+    result = ['@SP', 'A = M']
     result << "#{target} = M" if target
     result
   end
@@ -138,11 +179,6 @@ class CodeGenerator
 
   def push_d
     [*load_stack_pointer, 'M = D', *increment_stack_pointer]
-  end
-
-  def unique_label(name)
-    self.unique_label_counter += 1
-    "#{name}_#{unique_label_counter}"
   end
 
   def true_value
@@ -158,8 +194,4 @@ class CodeGenerator
     return ["@#{num}"] if num > 0
     ["@#{num.abs}", "A = -A"]
   end
-
-  include VM::Command
-
-  attr_accessor :commands
 end
